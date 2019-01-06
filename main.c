@@ -29,7 +29,7 @@ void main(void)
     SYSTEM_Initialize();
     STBY_SetLow();
     PWR_SetHigh();
-    
+    TMR0_StartTimer();
     
     uCAN_MSG rxMSG;
     uint16_t busOffCounter = 0;
@@ -52,58 +52,30 @@ void main(void)
             messageReceived = 0;
             __delay_ms(5);
             } else {
-            // valid message received
             busOffCounter = 0;
             messageReceived = 1;
-            /* Start main message timer since vehicle ignition on */
-            if (T0CON0bits.T0EN == 0){
-                // timer was disabled, start it
-                TMR0_StartTimer();                  // start sending TPMS messages
-            }
         }
-        if (busOffCounter >= 200){
-            /* No activity on CAN bus for awhile, sleep. */
+        if (busOffCounter >= 2000){
             busOffCounter = 0;
             powerDown();                    // No activity on CAN bus, sleep.
         }
-        /*
-         * Hold cruise cancel to toggle green power LED
-         */
         if (((rxMSG.frame.data0 & 0x70) == 0x40) && messageReceived){
-            // Message received indicating button press
-            // Stop message interval timer (to reset it)
-            TMR2_Stop();
             messageReceived = 0;
             //rxMSG.frame.data0 = 0;
-            counter++;                  // message counter
+            counter++;
             if (counter > 50){
                 counter = 0;
                 //DIAG_Toggle();
                 PWR_Toggle();
             }
-            // Start timer before leaving
-            TMR2_Start();
-        } else {
-            // Message not received, check one-shot timer for expiration
-            // Expiration will indicate 500ms since last cruise cancel message received which means button probably released
-            // Not sure on the receive interval when held?
-            if (TMR2_HasOverflowOccured()){
-                // timer expired, reset message counter
-                counter = 0;
-                // nothing needs to be done with the timer
-            }
+            
         }
         ERR_LAT = (CAN_isRXErrorPassive() || CAN_isTXErrorPassive() || CAN_isBusOff());     // set ERR LED if bus error exists
     }
 }
 
-void waitForCANactivity(uCAN_MSG *rxMSG){
-    while(!CAN_receive(&rxMSG));
-}
-
 /**
  * Called by TMR0 ISR every 100ms
- * Sends out good TPMS message over CANbus
  */
 void sendTPMSmessage() {
     //DIAG_Toggle();
@@ -177,7 +149,7 @@ void wakeUP(){
 }
 
 void powerDown(){
-    TMR0_StopTimer();               // stop the timer to stop sending messages
+    TMR0_StopTimer();
     canSleep();
     PWR_SetLow();                   // Turn off PWR LED
     ERR_SetLow();
@@ -187,11 +159,7 @@ void powerDown(){
     SLEEP();        
     wakeUP();
 }
-/*
- * When vehicle ignition is off, all CAN nodes are off as well. This means that
- * there will not be any node to acknowledge this device, and error frames will
- * result. 
- */
+
 void canSleep() {
     STBY_SetHigh();             // Put CAN transceiver in sleep mode (TX off)
     CANCONbits.REQOP = 0b001;   // CAN module sleep
